@@ -96,6 +96,10 @@ static inline int post_process(data_t* data, data_t* data_bcup, int N,
     if (data[i - 1] > data[i]) {
       printf("%s: ", name);
       TEST_FAIL("Arrays are sorted: NO!\n");
+      for (int j = begin + 1 ; j < end + 1 ; j++) {
+        printf("%d ", data[j]);
+      }
+      printf("\n");
       result = 0;
       break;
     }
