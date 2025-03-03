@@ -23,7 +23,70 @@
 
 #include "./util.h"
 
+
+// Function prototypes
+static void merge_p(data_t* A, int p, int q, int r);
+static void copy_p(data_t* source, data_t* dest, int n);
+
+
+// A basic merge sort routine that sorts the subarray A[p..r]
 void sort_p(data_t* A, int p, int r) {
-  printf("Unimplemented!\n");
+  assert(A);
+  if (p < r) {
+    int q = (p + r) / 2;
+    sort_p(A, p, q);
+    sort_p(A, q + 1, r);
+    merge_p(A, p, q, r);
+  }
+}
+
+// A merge routine. Merges the sub-arrays A [p..q] and A [q + 1..r].
+// Uses two arrays 'left' and 'right' in the merge operation.
+inline static void merge_p(data_t* A, int p, int q, int r) {
+  assert(A);
+  assert(p <= q);
+  assert((q + 1) <= r);
+  int n1 = q - p + 1;
+  int n2 = r - q;
+
+  data_t* left = 0, * right = 0;
+  mem_alloc(&left, n1 + 1);
+  mem_alloc(&right, n2 + 1);
+  if (left == NULL || right == NULL) {
+    mem_free(&left);
+    mem_free(&right);
+    return;
+  }
+
+  copy_p(&(A[p]), left, n1);
+  copy_p(&(A[q + 1]), right, n2);
+  left[n1] = UINT_MAX;
+  right[n2] = UINT_MAX;
+
+  data_t* left_curr = left;
+  data_t* right_curr = right;
+  data_t* A_curr = A + p;
+  data_t* const A_end = A + r + 1;
+
+  // Then our loop
+  while (A_curr < A_end) {
+      if (*left_curr <= *right_curr) {
+          *A_curr++ = *left_curr++;
+      } else {
+          *A_curr++ = *right_curr++;
+      }
+  }
+  mem_free(&left);
+  mem_free(&right);
+}
+
+inline static void copy_p(data_t* source, data_t* dest, int n) {
+  assert(dest);
+  assert(source);
+
+  const data_t* end = dest + n;
+  while (dest < end) {
+    *dest++ = *source++;
+  }
 }
 
