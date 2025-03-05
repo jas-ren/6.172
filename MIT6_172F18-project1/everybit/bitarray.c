@@ -30,6 +30,8 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
+#include <limits.h>
 
 #include <sys/types.h>
 
@@ -201,9 +203,42 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
                                  const size_t bit_offset,
                                  const size_t bit_length,
                                  const size_t bit_left_amount) {
-  for (size_t i = 0; i < bit_left_amount; i++) {
-    bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
-  }
+  // for (size_t i = 0; i < bit_left_amount; i++) {
+  //   bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
+  // }
+  // printf("bitarray: %d\n", *(bitarray->buf));
+  // printf("sizeof(bitarray->buf): %d\n", sizeof(*(bitarray->buf)));
+  // printf("bit_left_amount: %d\n", bit_left_amount);
+  // printf("bitarray.bit_sz: %zu\n", bitarray->bit_sz);
+  // char right_tail = (1 << (bitarray->bit_sz - bit_offset - bit_length)) - 1;
+  // printf("right_tail = %b\n", right_tail);
+  // printf("(-1 << 1): %b\n", -1 << 1);
+  // printf("(-1 >> (56 + bit_offset)): %b\n", (-1 >> (56 + bit_offset)));
+  // char mask = (-1 >> 56 + bit_offset) ^ right_tail;
+  // printf("mask: %b\n", mask);
+  // printf("*(bitarray->buf): %b\n", *(bitarray->buf));
+  // char sub_bitarray_to_rotate = *(bitarray->buf) & mask;
+  // printf("sub_bitarray_to_rotate: %b\n", sub_bitarray_to_rotate);
+  // *(bitarray->buf) = (sub_bitarray_to_rotate << bit_offset) & (sub_bitarray_to_rotate >> (bitarray->bit_sz - bit_offset));
+  // printf("last checkpoint\n");
+  
+  char first_left_shift = bitarray->bit_sz - bit_offset;
+  printf("first_left_shift: %d\n", first_left_shift);
+  char second_left_shift = first_left_shift - bit_length;
+  printf("second_left_shift: %d\n", second_left_shift);
+  char left_mask = -128 >> (bit_offset - 1);
+  printf("left_mask: %b\n", left_mask);
+  char right_mask = (1 << second_left_shift) - 1;
+  printf("right_mask: %b\n", right_mask);
+  char mask = ~(left_mask | right_mask);
+  printf("mask: %b\n", mask);
+  printf("*bitarray->buf: %b\n", *bitarray->buf);
+  printf("(*bitarray->buf & mask): %b\n", (*bitarray->buf & mask));
+  char to_rotate = (*bitarray->buf & mask) >> second_left_shift;
+  printf("to_rotate: %b\n", to_rotate);
+  char rotated = (to_rotate << bit_left_amount) & (to_rotate >> (bit_length - bit_left_amount));
+  printf("rotated: %b\n", rotated);
+  *(bitarray->buf) = rotated;
 }
 
 static void bitarray_rotate_left_one(bitarray_t* const bitarray,
