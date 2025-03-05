@@ -170,6 +170,8 @@ void testutil_frmstr(const char* const bitstring) {
     bitarray_free(test_bitarray);
   }
 
+  printf("bitstring: %s\n", bitstring);
+
   test_bitarray = bitarray_new(bitstring_length);
   assert(test_bitarray != NULL);
 

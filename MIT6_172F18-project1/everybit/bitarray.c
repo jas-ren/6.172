@@ -201,23 +201,35 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
                                  const size_t bit_offset,
                                  const size_t bit_length,
                                  const size_t bit_left_amount) {
-  for (size_t i = 0; i < bit_left_amount; i++) {
-    bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
-  }
+  // for (size_t i = 0; i < bit_left_amount; i++) {
+  //   bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
+  // }
+
+  // This solution would only work for sub-1-byte arrays
+  unsigned char right_offset = bitarray->bit_sz - bit_offset - bit_length;
+  unsigned char mask_for_portion_to_rotate = ((1 << bit_length) - 1 ) << right_offset;
+  unsigned char left_mask = mask_for_portion_to_rotate & ~((255 >> (bit_offset + bit_left_amount)) << right_offset);
+  unsigned char isolated_portion_to_rotate = (*bitarray->buf & mask_for_portion_to_rotate) >> right_offset;
+  unsigned char isolated_left_portion = (*bitarray->buf & left_mask) >> (bit_length - bit_left_amount + right_offset);
+  unsigned char right_mask = (1 << (bit_length - bit_left_amount)) - 1;
+  unsigned char isolated_rotated = (((isolated_portion_to_rotate & right_mask) << bit_left_amount) | isolated_left_portion) << right_offset;
+  unsigned char final_rotated = *bitarray->buf & ~mask_for_portion_to_rotate | isolated_rotated;
+  *bitarray->buf = final_rotated;
+
 }
 
-static void bitarray_rotate_left_one(bitarray_t* const bitarray,
-                                     const size_t bit_offset,
-                                     const size_t bit_length) {
-  // Grab the first bit in the range, shift everything left by one, and
-  // then stick the first bit at the end.
-  const bool first_bit = bitarray_get(bitarray, bit_offset);
-  size_t i;
-  for (i = bit_offset; i + 1 < bit_offset + bit_length; i++) {
-    bitarray_set(bitarray, i, bitarray_get(bitarray, i + 1));
-  }
-  bitarray_set(bitarray, i, first_bit);
-}
+// static void bitarray_rotate_left_one(bitarray_t* const bitarray,
+//                                      const size_t bit_offset,
+//                                      const size_t bit_length) {
+//   // Grab the first bit in the range, shift everything left by one, and
+//   // then stick the first bit at the end.
+//   const bool first_bit = bitarray_get(bitarray, bit_offset);
+//   size_t i;
+//   for (i = bit_offset; i + 1 < bit_offset + bit_length; i++) {
+//     bitarray_set(bitarray, i, bitarray_get(bitarray, i + 1));
+//   }
+//   bitarray_set(bitarray, i, first_bit);
+// }
 
 static size_t modulo(const ssize_t n, const size_t m) {
   const ssize_t signed_m = (ssize_t)m;
