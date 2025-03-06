@@ -40,6 +40,17 @@
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
+
+struct bitarray {
+  // The number of bits represented by this bit array.
+  // Need not be divisible by 8.
+  size_t bit_sz;
+
+  // The underlying memory buffer that stores the bits in
+  // packed form (8 per byte).
+  char* buf;
+};
+
 // ******************************* Prototypes *******************************
 
 // Creates a new bit array in test_bitarray by parsing a string of 0s
@@ -179,6 +190,8 @@ void testutil_frmstr(const char* const bitstring) {
   for (size_t i = 0; i < bitstring_length; i++) {
     current_bit = boolfromchar(bitstring[i]);
     bitarray_set(test_bitarray, i, current_bit);
+    printf("i: %zu\ncurrent_bit: %d\n", i, current_bit);
+    printf("bitarray: %b\n", *test_bitarray->buf);
   }
   bitarray_fprint(stdout, test_bitarray);
   if (test_verbose) {
