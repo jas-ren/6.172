@@ -37,6 +37,9 @@ typedef struct bitarray bitarray_t;
 // bit_sz is the number of bits storable in the resultant bit array
 bitarray_t* bitarray_new(const size_t bit_sz);
 
+// Print out the bitarray
+void bitarray_pprint(const bitarray_t* const bitarray);
+
 // Frees a bit array allocated by bitarray_new.
 void bitarray_free(bitarray_t* const bitarray);
 

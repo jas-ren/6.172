@@ -30,6 +30,8 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <stdio.h>
 
 #include <sys/types.h>
 
@@ -73,9 +75,9 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
 // The subarray spans the half-open interval
 // [bit_offset, bit_offset + bit_length)
 // That is, the start is inclusive, but the end is exclusive.
-static void bitarray_rotate_left_one(bitarray_t* const bitarray,
-                                     const size_t bit_offset,
-                                     const size_t bit_length);
+// static void bitarray_rotate_left_one(bitarray_t* const bitarray,
+//                                      const size_t bit_offset,
+//                                      const size_t bit_length);
 
 // Portable modulo operation that supports negative dividends.
 //
@@ -107,6 +109,8 @@ static size_t modulo(const ssize_t n, const size_t m);
 // not matter.
 static char bitmask(const size_t bit_index);
 
+static void bitarray_reverse(bitarray_t* bitarray, const size_t start, const size_t end);
+
 
 // ******************************* Functions ********************************
 
@@ -128,6 +132,71 @@ bitarray_t* bitarray_new(const size_t bit_sz) {
   bitarray->bit_sz = bit_sz;
   return bitarray;
 }
+
+void bitarray_pprint(const bitarray_t* const bitarray) {
+  if (bitarray == NULL) {
+    printf("NULL bitarray\n");
+    return;
+  }
+
+  printf("Bitarray at address: %p\n", (void*)bitarray);
+  printf("Buffer address: %p\n", (void*)bitarray->buf);
+  printf("Total size: %zu bits (%zu bytes with %zu bits used in last byte)\n",
+    bitarray->bit_sz,
+    (bitarray->bit_sz + 7) / 8,
+    bitarray->bit_sz % 8 == 0 ? 8 : bitarray->bit_sz % 8);
+  
+  size_t num_bytes = (bitarray->bit_sz + 7) / 8;
+
+  printf("\nMemory representation (MSB to LSB):\n");
+  printf("            Bit| 7  6  5  4  | 3  2  1  0 |\n");
+  printf("---------------+-------------+------------+\n");
+
+  for (size_t i = 0; i < num_bytes; i++) {
+    // Get the current byte
+    unsigned char byte = (unsigned char)bitarray->buf[i];
+
+    // Print byte address and index
+    printf("0x%04lx | ", (unsigned long)(bitarray->buf + i));
+    
+    // Print binary representation
+    for (int j = 7; j >= 0; j--) {
+      // Check if this bit position is within the array's size
+      size_t bit_pos = i * 8 + (7 - j);
+      if (bit_pos < bitarray->bit_sz) {
+        // This bit is part of the bitarray
+        printf("%d  ", (byte >> j) & 1);
+      } else {
+        // This bit is past the end of the array
+        printf("x  ");  // Mark unused bits
+      }
+      
+      // Add a separator between groups of 4 bits
+      if (j == 4) printf("| ");
+    }
+    
+    // Print the byte value in hex
+    printf("  (0x%02x)", byte);
+    
+    // For the last byte, show which bits are used if not all 8
+    if (i == num_bytes - 1 && bitarray->bit_sz % 8 != 0) {
+      printf(" [%zu bits used]", bitarray->bit_sz % 8);
+    }
+    
+    printf("\n");
+  }
+  
+  // Print a summary of the contents with bit indices
+  printf("\nBit values (0-indexed):\n");
+  for (size_t i = 0; i < bitarray->bit_sz; i++) {
+    if (i > 0 && i % 16 == 0) printf("\n");
+    else if (i > 0 && i % 8 == 0) printf("  ");
+    printf("%d", bitarray_get(bitarray, i));
+    if ((i + 1) % 8 != 0) printf(" ");
+  }
+  printf("\n");
+}
+
 
 void bitarray_free(bitarray_t* const bitarray) {
   if (bitarray == NULL) {
@@ -201,23 +270,27 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
                                  const size_t bit_offset,
                                  const size_t bit_length,
                                  const size_t bit_left_amount) {
-  for (size_t i = 0; i < bit_left_amount; i++) {
-    bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
-  }
+  // for (size_t i = 0; i < bit_left_amount; i++) {
+  //   bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
+  // }
+  size_t midpoint = bit_offset + bit_left_amount;
+  bitarray_reverse(bitarray, bit_offset, midpoint);
+  bitarray_reverse(bitarray, midpoint, bit_offset + bit_length);
+  bitarray_reverse(bitarray, bit_offset, bit_offset + bit_length);
 }
 
-static void bitarray_rotate_left_one(bitarray_t* const bitarray,
-                                     const size_t bit_offset,
-                                     const size_t bit_length) {
-  // Grab the first bit in the range, shift everything left by one, and
-  // then stick the first bit at the end.
-  const bool first_bit = bitarray_get(bitarray, bit_offset);
-  size_t i;
-  for (i = bit_offset; i + 1 < bit_offset + bit_length; i++) {
-    bitarray_set(bitarray, i, bitarray_get(bitarray, i + 1));
-  }
-  bitarray_set(bitarray, i, first_bit);
-}
+// static void bitarray_rotate_left_one(bitarray_t* const bitarray,
+//                                      const size_t bit_offset,
+//                                      const size_t bit_length) {
+//   // Grab the first bit in the range, shift everything left by one, and
+//   // then stick the first bit at the end.
+//   const bool first_bit = bitarray_get(bitarray, bit_offset);
+//   size_t i;
+//   for (i = bit_offset; i + 1 < bit_offset + bit_length; i++) {
+//     bitarray_set(bitarray, i, bitarray_get(bitarray, i + 1));
+//   }
+//   bitarray_set(bitarray, i, first_bit);
+// }
 
 static size_t modulo(const ssize_t n, const size_t m) {
   const ssize_t signed_m = (ssize_t)m;
@@ -231,3 +304,16 @@ static char bitmask(const size_t bit_index) {
   return 1 << (bit_index % 8);
 }
 
+static void bitarray_reverse(bitarray_t* bitarray, const size_t start, const size_t end) {
+  // [start, end)
+  size_t left = start;
+  size_t right = end - 1;
+  while (left < right) {
+    bool left_bit = bitarray_get(bitarray, left);
+    bool right_bit = bitarray_get(bitarray, right);
+    bitarray_set(bitarray, left, right_bit);
+    bitarray_set(bitarray, right, left_bit);
+    left++;
+    right--;
+  }
+}
