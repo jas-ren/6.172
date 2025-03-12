@@ -308,7 +308,7 @@ static void bitarray_reverse(bitarray_t* bitarray, const size_t start, const siz
   // [start, end)
   size_t left = start;
   size_t right = end - 1;
-  while (left < right) {
+  while (left < right && right <= end) {
     bool left_bit = bitarray_get(bitarray, left);
     bool right_bit = bitarray_get(bitarray, right);
     bitarray_set(bitarray, left, right_bit);
