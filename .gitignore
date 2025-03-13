@@ -53,3 +53,6 @@ dkms.conf
 
 # performance
 cachegrind.out.*
+
+# vscode settings
+*.vscode/*
