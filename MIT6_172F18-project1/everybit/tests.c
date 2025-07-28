@@ -178,8 +178,7 @@ void testutil_frmstr(const char* const bitstring) {
     current_bit = boolfromchar(bitstring[i]);
     bitarray_set(test_bitarray, i, current_bit);
   }
-  // bitarray_fprint(stdout, test_bitarray);
-  bitarray_pprint(test_bitarray);
+
   if (test_verbose) {
     fprintf(stdout, " newstr lit=%s\n", bitstring);
     testutil_expect(bitstring);
