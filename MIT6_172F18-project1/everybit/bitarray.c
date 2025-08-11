@@ -27,13 +27,7 @@
 
 #include "./bitarray.h"
 
-#include <assert.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <signal.h>
-#include <stdio.h>
 
-#include <sys/types.h>
 
 
 // ********************************* Types **********************************
@@ -214,19 +208,6 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
   bitarray_reverse(bitarray, bit_offset, bit_offset + bit_length);
 }
 
-// static void bitarray_rotate_left_one(bitarray_t* const bitarray,
-//                                      const size_t bit_offset,
-//                                      const size_t bit_length) {
-//   // Grab the first bit in the range, shift everything left by one, and
-//   // then stick the first bit at the end.
-//   const bool first_bit = bitarray_get(bitarray, bit_offset);
-//   size_t i;
-//   for (i = bit_offset; i + 1 < bit_offset + bit_length; i++) {
-//     bitarray_set(bitarray, i, bitarray_get(bitarray, i + 1));
-//   }
-//   bitarray_set(bitarray, i, first_bit);
-// }
-
 static size_t modulo(const ssize_t n, const size_t m) {
   const ssize_t signed_m = (ssize_t)m;
   assert(signed_m > 0);
@@ -251,4 +232,109 @@ static void bitarray_reverse(bitarray_t* bitarray, const size_t start, const siz
     left++;
     right--;
   }
+}
+
+u_int64_t word_size_bitarray_rotate(const u_int64_t bitarray,
+                                      const size_t offset,
+                                      const size_t length,
+                                      const size_t right_rotation) {
+  u_int64_t mask = ((1ULL << length) - 1) << offset;
+  u_int64_t subarray_to_rotate = bitarray & mask;
+  u_int64_t left = subarray_to_rotate << right_rotation;
+  u_int64_t right = subarray_to_rotate >> (length - right_rotation);
+  u_int64_t rotated_subarray = (left | right) & mask;
+  return rotated_subarray | (~mask & bitarray);
+}
+
+static void multi_word_rotate(u_int64_t* bitarray,
+                              const size_t offset, // bits
+                              const size_t length,
+                              const size_t right_rotation) {
+  const size_t WORDSIZE = 64; // in bits
+  u_int64_t* subarray_to_rotate = calloc((length + WORDSIZE - 1) / WORDSIZE, sizeof(u_int64_t)); // round to nearest word
+
+  // Isolate the subarray to be rotated
+  u_int64_t len_copy = length;
+  u_int64_t offset_within_word = offset % WORDSIZE;
+  u_int64_t offset_within_word_copy = offset_within_word;
+  size_t source_ind = offset / WORDSIZE;
+  size_t dest_ind = 0;
+  while (len_copy > 0)  {
+    u_int64_t mask;
+    if ((len_copy + offset_within_word) < WORDSIZE) { // the remaining bits fit within the word
+      mask = ((1ULL << len_copy) - 1) << offset_within_word;
+    } else {
+      mask = -1ULL << offset_within_word;
+    }
+    subarray_to_rotate[dest_ind] = bitarray[source_ind] & mask;
+    len_copy -= __builtin_popcount(mask);
+    offset_within_word = 0;
+    dest_ind++;
+    source_ind++;
+  }
+  // Results in the bits that need to be rotated in the new subarray_to_rotate, but with
+  // padding in the front by offset_within_word_copy.
+
+  // Align the subarray to be rotated
+  offset_within_word = offset_within_word_copy;
+  for (size_t i = 0; i < dest_ind - 1; ++i) {
+    u_int64_t current_aligned = subarray_to_rotate[i] << offset_within_word;
+    u_int64_t next_partial = (subarray_to_rotate[i+1] >> (WORDSIZE - offset_within_word));
+    subarray_to_rotate[i] = current_aligned | next_partial;
+  }
+
+
+  // perform the rotation
+  // First we need to clarify how many words in subarray_to_rotate contain valid bits
+  // so that we don't accidentally mix padding into the rotation
+  size_t last_word_idx = (length + WORDSIZE - 1) / WORDSIZE;
+  size_t trailing_bits_count = length % WORDSIZE;
+
+  // Step 1: move the bits within words
+  u_int64_t n_bits = right_rotation % WORDSIZE;
+  if (n_bits < trailing_bits_count) {
+    u_int64_t first_word = subarray_to_rotate[0];
+    for (size_t j = 0; j < last_word_idx - 1; ++j) {
+      u_int64_t current_aligned = subarray_to_rotate[j] << n_bits;
+      u_int64_t next_partial = (subarray_to_rotate[j + 1] >> (WORDSIZE - n_bits)); 
+      subarray_to_rotate[j] = current_aligned | next_partial;
+    }
+    u_int64_t last_word = subarray_to_rotate[last_word_idx] << n_bits;
+    u_int64_t wrap_around_partial = first_word >> (WORDSIZE - n_bits);
+    subarray_to_rotate[last_word_idx] = last_word | wrap_around_partial;
+  } else {
+    u_int64_t first_word = subarray_to_rotate[0];
+    for (size_t j = 0; j < last_word_idx - 2; ++j) {
+      u_int64_t current_aligned = subarray_to_rotate[j] << n_bits;
+      u_int64_t next_partial = (subarray_to_rotate[j + 1] >> (WORDSIZE - n_bits)); 
+      subarray_to_rotate[j] = current_aligned | next_partial;
+    }
+    u_int64_t second_last_word = subarray_to_rotate[last_word_idx - 1] << n_bits;
+    u_int64_t trailing_bits_shifted = subarray_to_rotate[last_word_idx] >> (WORDSIZE - trailing_bits_count - n_bits);
+    u_int64_t bits_from_first_word_that_fall_into_second_last_word = first_word >> (WORDSIZE - (n_bits - trailing_bits_count));
+    second_last_word = second_last_word | trailing_bits_shifted | bits_from_first_word_that_fall_into_second_last_word;
+    subarray_to_rotate[last_word_idx - 1] = second_last_word;
+
+    subarray_to_rotate[last_word_idx] = first_word >> (WORDSIZE - trailing_bits_count);
+  }
+
+  // Step 2: move whole words by n_words
+  u_int64_t n_words = right_rotation / WORDSIZE;
+  u_int64_t* temp_buf = malloc(n_words * sizeof(u_int64_t));
+  memcpy(temp_buf, subarray_to_rotate, n_words * sizeof(u_int64_t));
+  memmove(subarray_to_rotate, subarray_to_rotate + n_words, (dest_ind - n_words) * sizeof(u_int64_t));
+  memcpy(subarray_to_rotate + (dest_ind - n_words), temp_buf, n_words * sizeof(u_int64_t));
+  free(temp_buf);
+
+  // shift the rotated words back by n_words
+  size_t len_copy = length;
+  size_t offset_within_word = offset % WORDSIZE;
+  size_t dest_word_ind = offset / WORDSIZE;
+  size_t source_bit_pos = 0;
+
+  // TODO: actually shift
+  // TODO: put the shifted subarray back
+
+
+  free(subarray_to_rotate);
 }

@@ -26,6 +26,13 @@
 #include <sys/types.h>
 #include <stdbool.h>
 
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <stdio.h>
+
+#include <sys/types.h>
 // ********************************* Types **********************************
 
 // Abstract data type representing an array of bits.
@@ -85,4 +92,8 @@ void bitarray_rotate(bitarray_t* const bitarray,
                      const size_t bit_length,
                      const ssize_t bit_right_amount);
 
+u_int64_t word_size_bitarray_rotate(const u_int64_t bitarray,
+                        const size_t offset,
+                        const size_t length,
+                        const size_t right_rotation);
 #endif  // BITARRAY_H
