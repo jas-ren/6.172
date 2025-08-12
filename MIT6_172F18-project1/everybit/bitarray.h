@@ -96,4 +96,10 @@ u_int64_t word_size_bitarray_rotate(const u_int64_t bitarray,
                         const size_t offset,
                         const size_t length,
                         const size_t right_rotation);
+
+// Multi-word rotation function for testing
+void multi_word_rotate(u_int64_t* bitarray,
+                      const size_t offset,
+                      const size_t length,
+                      const size_t right_rotation);
 #endif  // BITARRAY_H

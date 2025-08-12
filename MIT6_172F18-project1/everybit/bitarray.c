@@ -27,7 +27,14 @@
 
 #include "./bitarray.h"
 
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <sys/types.h>
 
 
 // ********************************* Types **********************************
@@ -238,7 +245,17 @@ u_int64_t word_size_bitarray_rotate(const u_int64_t bitarray,
                                       const size_t offset,
                                       const size_t length,
                                       const size_t right_rotation) {
-  u_int64_t mask = ((1ULL << length) - 1) << offset;
+  // Handle edge case: avoid undefined behavior when length == 64
+  u_int64_t mask;
+  if (length == 64 && offset == 0) {
+    mask = ~0ULL;  // All bits set
+  } else if (length == 64) {
+    // This shouldn't happen in a properly called function, but handle it
+    mask = ~0ULL >> offset;
+  } else {
+    mask = ((1ULL << length) - 1) << offset;
+  }
+  
   u_int64_t subarray_to_rotate = bitarray & mask;
   u_int64_t left = subarray_to_rotate << right_rotation;
   u_int64_t right = subarray_to_rotate >> (length - right_rotation);
@@ -246,14 +263,25 @@ u_int64_t word_size_bitarray_rotate(const u_int64_t bitarray,
   return rotated_subarray | (~mask & bitarray);
 }
 
-static void multi_word_rotate(u_int64_t* bitarray,
+void multi_word_rotate(u_int64_t* bitarray,
                               const size_t offset, // bits
                               const size_t length,
                               const size_t right_rotation) {
+  if (right_rotation % length == 0) {
+    return;
+  }
   const size_t WORDSIZE = 64; // in bits
+  
+  // Optimization: if the rotation fits in a single word, use the simpler function
+  if (length <= WORDSIZE && (offset % WORDSIZE) + length <= WORDSIZE) {
+    size_t word_idx = offset / WORDSIZE;
+    bitarray[word_idx] = word_size_bitarray_rotate(bitarray[word_idx], offset % WORDSIZE, length, right_rotation);
+    return;
+  }
+  
   u_int64_t* subarray_to_rotate = calloc((length + WORDSIZE - 1) / WORDSIZE, sizeof(u_int64_t)); // round to nearest word
 
-  // Isolate the subarray to be rotated
+  // Step 1: Isolate the subarray to be rotated
   u_int64_t len_copy = length;
   u_int64_t offset_within_word = offset % WORDSIZE;
   u_int64_t offset_within_word_copy = offset_within_word;
@@ -267,7 +295,7 @@ static void multi_word_rotate(u_int64_t* bitarray,
       mask = -1ULL << offset_within_word;
     }
     subarray_to_rotate[dest_ind] = bitarray[source_ind] & mask;
-    len_copy -= __builtin_popcount(mask);
+    len_copy -= __builtin_popcountll(mask);
     offset_within_word = 0;
     dest_ind++;
     source_ind++;
@@ -275,7 +303,7 @@ static void multi_word_rotate(u_int64_t* bitarray,
   // Results in the bits that need to be rotated in the new subarray_to_rotate, but with
   // padding in the front by offset_within_word_copy.
 
-  // Align the subarray to be rotated
+  // Step 2: Align the subarray to be rotated
   offset_within_word = offset_within_word_copy;
   for (size_t i = 0; i < dest_ind - 1; ++i) {
     u_int64_t current_aligned = subarray_to_rotate[i] << offset_within_word;
@@ -284,13 +312,14 @@ static void multi_word_rotate(u_int64_t* bitarray,
   }
 
 
-  // perform the rotation
+  // Step 3: Perform the rotation
   // First we need to clarify how many words in subarray_to_rotate contain valid bits
   // so that we don't accidentally mix padding into the rotation
-  size_t last_word_idx = (length + WORDSIZE - 1) / WORDSIZE;
+  size_t num_words = (length + WORDSIZE - 1) / WORDSIZE;
+  size_t last_word_idx = num_words - 1;  // Convert count to index
   size_t trailing_bits_count = length % WORDSIZE;
 
-  // Step 1: move the bits within words
+  // Substep 1: move the bits within words
   u_int64_t n_bits = right_rotation % WORDSIZE;
   if (n_bits < trailing_bits_count) {
     u_int64_t first_word = subarray_to_rotate[0];
@@ -304,21 +333,28 @@ static void multi_word_rotate(u_int64_t* bitarray,
     subarray_to_rotate[last_word_idx] = last_word | wrap_around_partial;
   } else {
     u_int64_t first_word = subarray_to_rotate[0];
-    for (size_t j = 0; j < last_word_idx - 2; ++j) {
-      u_int64_t current_aligned = subarray_to_rotate[j] << n_bits;
-      u_int64_t next_partial = (subarray_to_rotate[j + 1] >> (WORDSIZE - n_bits)); 
-      subarray_to_rotate[j] = current_aligned | next_partial;
+    
+    // Handle the general case: shift all words except the last two
+    if (last_word_idx >= 2) {
+      for (size_t j = 0; j < last_word_idx - 1; ++j) {
+        u_int64_t current_aligned = subarray_to_rotate[j] << n_bits;
+        u_int64_t next_partial = (subarray_to_rotate[j + 1] >> (WORDSIZE - n_bits)); 
+        subarray_to_rotate[j] = current_aligned | next_partial;
+      }
+      
+      // Handle second-to-last word
+      u_int64_t second_last_word = subarray_to_rotate[last_word_idx - 1] << n_bits;
+      u_int64_t trailing_bits_shifted = subarray_to_rotate[last_word_idx] >> (WORDSIZE - trailing_bits_count - n_bits);
+      u_int64_t bits_from_first_word_that_fall_into_second_last_word = first_word >> (WORDSIZE - (n_bits - trailing_bits_count));
+      second_last_word = second_last_word | trailing_bits_shifted | bits_from_first_word_that_fall_into_second_last_word;
+      subarray_to_rotate[last_word_idx - 1] = second_last_word;
     }
-    u_int64_t second_last_word = subarray_to_rotate[last_word_idx - 1] << n_bits;
-    u_int64_t trailing_bits_shifted = subarray_to_rotate[last_word_idx] >> (WORDSIZE - trailing_bits_count - n_bits);
-    u_int64_t bits_from_first_word_that_fall_into_second_last_word = first_word >> (WORDSIZE - (n_bits - trailing_bits_count));
-    second_last_word = second_last_word | trailing_bits_shifted | bits_from_first_word_that_fall_into_second_last_word;
-    subarray_to_rotate[last_word_idx - 1] = second_last_word;
 
+    // Handle last word
     subarray_to_rotate[last_word_idx] = first_word >> (WORDSIZE - trailing_bits_count);
   }
 
-  // Step 2: move whole words by n_words
+  // Substep 2: move whole words by n_words
   u_int64_t n_words = right_rotation / WORDSIZE;
   u_int64_t* temp_buf = malloc(n_words * sizeof(u_int64_t));
   memcpy(temp_buf, subarray_to_rotate, n_words * sizeof(u_int64_t));
@@ -326,15 +362,46 @@ static void multi_word_rotate(u_int64_t* bitarray,
   memcpy(subarray_to_rotate + (dest_ind - n_words), temp_buf, n_words * sizeof(u_int64_t));
   free(temp_buf);
 
-  // shift the rotated words back by n_words
-  size_t len_copy = length;
-  size_t offset_within_word = offset % WORDSIZE;
-  size_t dest_word_ind = offset / WORDSIZE;
-  size_t source_bit_pos = 0;
 
-  // TODO: actually shift
-  // TODO: put the shifted subarray back
+  // Step 4: shift the rotated words back by n_bits
+  size_t bits_offset = offset % WORDSIZE;
+  if (trailing_bits_count + bits_offset <= WORDSIZE) {
+    for (size_t k = 1; k <= last_word_idx; ++k) {
+      u_int64_t current_shifted = subarray_to_rotate[k] >> bits_offset;
+      u_int64_t overflow_from_previous = subarray_to_rotate[k-1] << (WORDSIZE - bits_offset);
+      subarray_to_rotate[k] = current_shifted | overflow_from_previous;
+    }
+    subarray_to_rotate[0] = subarray_to_rotate[0] >> bits_offset;
+  } else {
+    u_int64_t last_word = subarray_to_rotate[last_word_idx];
+    for (size_t k = 1; k < last_word_idx; ++k) {
+      u_int64_t current_shifted = subarray_to_rotate[k] >> bits_offset;
+      u_int64_t overflow_from_previous = subarray_to_rotate[k-1] << (WORDSIZE - bits_offset);
+      subarray_to_rotate[k] = current_shifted | overflow_from_previous;
+    }
+    subarray_to_rotate[last_word_idx] = last_word >> bits_offset;
+    subarray_to_rotate[last_word_idx + 1] = last_word << (WORDSIZE - bits_offset);
+    subarray_to_rotate[0] = subarray_to_rotate[0] >> bits_offset;
+    last_word_idx++;
+  }
 
-
+  // Step 5: Put the bits back into the original array
+  size_t original_array_idx = offset / WORDSIZE;
+  size_t rotation_array_idx = 0;
+  while (rotation_array_idx <= last_word_idx) {
+    if (rotation_array_idx == 0) {
+      u_int64_t first_word_mask = -1ULL << (WORDSIZE - offset_within_word_copy);
+      u_int64_t first_word = (bitarray[original_array_idx] & first_word_mask) | (subarray_to_rotate[rotation_array_idx] & ~first_word_mask);
+      bitarray[original_array_idx] = first_word;
+    } else if (rotation_array_idx == last_word_idx) {
+      u_int64_t last_word_mask = -1ULL >> (offset_within_word_copy + trailing_bits_count);
+      u_int64_t last_word = (bitarray[original_array_idx] & last_word_mask) | subarray_to_rotate[rotation_array_idx];
+      bitarray[original_array_idx] = last_word;
+    } else {
+      bitarray[original_array_idx] = subarray_to_rotate[rotation_array_idx];
+    }
+    original_array_idx++;
+    rotation_array_idx++;
+  }
   free(subarray_to_rotate);
 }
