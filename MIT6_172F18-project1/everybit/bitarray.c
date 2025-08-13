@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <sys/types.h>
@@ -206,13 +207,19 @@ static void bitarray_rotate_left(bitarray_t* const bitarray,
                                  const size_t bit_offset,
                                  const size_t bit_length,
                                  const size_t bit_left_amount) {
-  // for (size_t i = 0; i < bit_left_amount; i++) {
-  //   bitarray_rotate_left_one(bitarray, bit_offset, bit_length);
-  // }
-  size_t midpoint = bit_offset + bit_left_amount;
-  bitarray_reverse(bitarray, bit_offset, midpoint);
-  bitarray_reverse(bitarray, midpoint, bit_offset + bit_length);
-  bitarray_reverse(bitarray, bit_offset, bit_offset + bit_length);
+  size_t required_bytes = (bit_offset + bit_length + 7) / 8;
+  size_t allocated_bytes = (bitarray->bit_sz + 7) / 8;
+  
+  if (required_bytes <= allocated_bytes && allocated_bytes >= 8 && bit_length >= 64) {
+    size_t right_rotation = (bit_length - bit_left_amount) % bit_length;
+    uint64_t* word_array = (uint64_t*)bitarray->buf;
+    multi_word_rotate(word_array, bit_offset, bit_length, right_rotation);
+  } else {
+    size_t midpoint = bit_offset + bit_left_amount;
+    bitarray_reverse(bitarray, bit_offset, midpoint);
+    bitarray_reverse(bitarray, midpoint, bit_offset + bit_length);
+    bitarray_reverse(bitarray, bit_offset, bit_offset + bit_length);
+  }
 }
 
 static size_t modulo(const ssize_t n, const size_t m) {
@@ -279,7 +286,17 @@ void multi_word_rotate(u_int64_t* bitarray,
     return;
   }
   
-  u_int64_t* subarray_to_rotate = calloc((length + WORDSIZE - 1) / WORDSIZE, sizeof(u_int64_t)); // round to nearest word
+  // Use stack allocation for reasonable sizes to avoid malloc overhead
+  size_t words_needed = (length + WORDSIZE - 1) / WORDSIZE + 2;  // allocate extra room because we have way too many segfaults
+  u_int64_t* subarray_to_rotate;
+  u_int64_t stack_buffer[64];
+  
+  if (words_needed <= 64) {
+    subarray_to_rotate = stack_buffer;
+    memset(subarray_to_rotate, 0, words_needed * sizeof(u_int64_t));
+  } else {
+    subarray_to_rotate = calloc(words_needed, sizeof(u_int64_t));
+  }
 
   // Step 1: Isolate the subarray to be rotated
   u_int64_t len_copy = length;
@@ -403,5 +420,7 @@ void multi_word_rotate(u_int64_t* bitarray,
     original_array_idx++;
     rotation_array_idx++;
   }
-  free(subarray_to_rotate);
+  if (words_needed > 64) {
+    free(subarray_to_rotate);
+  }
 }
